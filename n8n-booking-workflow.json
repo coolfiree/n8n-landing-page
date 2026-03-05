@@ -1,0 +1,234 @@
+{
+  "name": "Book a Call - Website Booking Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "book-call",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "book-call"
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Bookings",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "DateTime",
+              "lookupValue": "={{ $json.date.split('T')[0] }} {{ $json.time }}"
+            },
+            {
+              "lookupColumn": "Status",
+              "lookupValue": "booked"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "check-slot",
+      "name": "Check Slot Availability",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "slot-available-check",
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-slot-available",
+      "name": "Slot Available?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "primary",
+          "mode": "id"
+        },
+        "start": "={{ $('Webhook').item.json.date.split('T')[0] }}T{{ $('Webhook').item.json.time }}:00",
+        "end": "={{ $('Webhook').item.json.date.split('T')[0] }}T{{ $now.plus({minutes: 30}).toFormat('HH:mm') }}:00",
+        "additionalFields": {
+          "summary": "=Discovery Call: {{ $('Webhook').item.json.name }}",
+          "description": "=Booking from website\n\nName: {{ $('Webhook').item.json.name }}\nEmail: {{ $('Webhook').item.json.email }}\nNote: {{ $('Webhook').item.json.note }}\n\nBooked at: {{ $('Webhook').item.json.bookedAt }}",
+          "attendees": [
+            {
+              "email": "={{ $('Webhook').item.json.email }}"
+            }
+          ],
+          "conferenceData": {
+            "createRequest": {
+              "requestId": "={{ $('Webhook').item.json.email }}-{{ $now.toUnixInteger() }}",
+              "conferenceSolutionKey": {
+                "type": "hangoutsMeet"
+              }
+            }
+          },
+          "sendUpdates": "all"
+        }
+      },
+      "id": "create-calendar-event",
+      "name": "Create Google Meet Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.1,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Bookings",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $('Webhook').item.json.name }}",
+            "Email": "={{ $('Webhook').item.json.email }}",
+            "Date": "={{ $('Webhook').item.json.dateFormatted }}",
+            "Time": "={{ $('Webhook').item.json.timeFormatted }}",
+            "DateTime": "={{ $('Webhook').item.json.date.split('T')[0] }} {{ $('Webhook').item.json.time }}",
+            "Note": "={{ $('Webhook').item.json.note }}",
+            "MeetLink": "={{ $json.conferenceData.entryPoints[0].uri }}",
+            "EventId": "={{ $json.id }}",
+            "Status": "booked",
+            "BookedAt": "={{ $('Webhook').item.json.bookedAt }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "save-booking",
+      "name": "Save Booking to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook').item.json.email }}",
+        "subject": "=✅ Your call is confirmed — {{ $('Webhook').item.json.dateFormatted }} at {{ $('Webhook').item.json.timeFormatted }}",
+        "emailType": "html",
+        "message": "=<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 520px; margin: 0 auto; background: #fff; border-radius: 12px; overflow: hidden; border: 1px solid #e5e7eb;\">\n  <div style=\"background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 32px; text-align: center;\">\n    <h1 style=\"color: white; font-size: 24px; margin: 0;\">🗓️ Call Confirmed!</h1>\n  </div>\n  <div style=\"padding: 32px;\">\n    <p style=\"color: #374151; font-size: 16px;\">Hi <strong>{{ $('Webhook').item.json.name }}</strong>,</p>\n    <p style=\"color: #6b7280;\">Your call is booked and a Google Meet link has been created for you.</p>\n\n    <div style=\"background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin: 24px 0;\">\n      <p style=\"margin: 0 0 8px; color: #374151;\"><strong>📅 Date:</strong> {{ $('Webhook').item.json.dateFormatted }}</p>\n      <p style=\"margin: 0 0 8px; color: #374151;\"><strong>⏰ Time:</strong> {{ $('Webhook').item.json.timeFormatted }} IST</p>\n      <p style=\"margin: 0; color: #374151;\"><strong>⏱️ Duration:</strong> 30 minutes</p>\n    </div>\n\n    <a href=\"{{ $('Create Google Meet Event').item.json.conferenceData.entryPoints[0].uri }}\" style=\"display: inline-block; background: #6366f1; color: white; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px;\">Join Google Meet →</a>\n\n    <p style=\"color: #9ca3af; font-size: 13px; margin-top: 24px;\">The call link is also in your Google Calendar invite. See you soon!</p>\n  </div>\n</div>",
+        "options": {}
+      },
+      "id": "email-client",
+      "name": "Email Client Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1340, 120]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL@gmail.com",
+        "subject": "=📩 New booking: {{ $('Webhook').item.json.name }} — {{ $('Webhook').item.json.dateFormatted }} at {{ $('Webhook').item.json.timeFormatted }}",
+        "emailType": "html",
+        "message": "=<div style=\"font-family: -apple-system, sans-serif; max-width: 520px; margin: 0 auto;\">\n  <h2>New booking received</h2>\n  <table style=\"width:100%; border-collapse: collapse;\">\n    <tr><td style=\"padding:8px; border-bottom:1px solid #eee;\"><strong>Name</strong></td><td style=\"padding:8px; border-bottom:1px solid #eee;\">{{ $('Webhook').item.json.name }}</td></tr>\n    <tr><td style=\"padding:8px; border-bottom:1px solid #eee;\"><strong>Email</strong></td><td style=\"padding:8px; border-bottom:1px solid #eee;\">{{ $('Webhook').item.json.email }}</td></tr>\n    <tr><td style=\"padding:8px; border-bottom:1px solid #eee;\"><strong>Date</strong></td><td style=\"padding:8px; border-bottom:1px solid #eee;\">{{ $('Webhook').item.json.dateFormatted }}</td></tr>\n    <tr><td style=\"padding:8px; border-bottom:1px solid #eee;\"><strong>Time</strong></td><td style=\"padding:8px; border-bottom:1px solid #eee;\">{{ $('Webhook').item.json.timeFormatted }} IST</td></tr>\n    <tr><td style=\"padding:8px; border-bottom:1px solid #eee;\"><strong>Note</strong></td><td style=\"padding:8px; border-bottom:1px solid #eee;\">{{ $('Webhook').item.json.note || '-' }}</td></tr>\n  </table>\n  <a href=\"{{ $('Create Google Meet Event').item.json.conferenceData.entryPoints[0].uri }}\" style=\"display:inline-block; margin-top:16px; background:#6366f1; color:white; padding:12px 24px; border-radius:8px; text-decoration:none;\">Join Meet →</a>\n</div>",
+        "options": {}
+      },
+      "id": "email-host",
+      "name": "Notify Host",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1340, 280]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, meetLink: $('Create Google Meet Event').item.json.conferenceData.entryPoints[0].uri, eventId: $('Create Google Meet Event').item.json.id }) }}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"error\": \"This time slot is already booked. Please pick a different time.\" }",
+        "options": {
+          "responseCode": 409
+        }
+      },
+      "id": "respond-conflict",
+      "name": "Respond - Slot Taken",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 420]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Check Slot Availability", "type": "main", "index": 0 }]]
+    },
+    "Check Slot Availability": {
+      "main": [[{ "node": "Slot Available?", "type": "main", "index": 0 }]]
+    },
+    "Slot Available?": {
+      "main": [
+        [{ "node": "Create Google Meet Event", "type": "main", "index": 0 }],
+        [{ "node": "Respond - Slot Taken", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create Google Meet Event": {
+      "main": [[{ "node": "Save Booking to Sheet", "type": "main", "index": 0 }]]
+    },
+    "Save Booking to Sheet": {
+      "main": [[
+        { "node": "Email Client Confirmation", "type": "main", "index": 0 },
+        { "node": "Notify Host", "type": "main", "index": 0 }
+      ]]
+    },
+    "Email Client Confirmation": {
+      "main": [[{ "node": "Respond Success", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
